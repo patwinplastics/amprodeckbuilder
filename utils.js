@@ -6,10 +6,52 @@ function calculateDeckArea(points) {
   }, 0) / 2 / 50 / 50); // Area in m²
 }
 
+function createDefaultDeck(widthFt = 12, lengthFt = 12) {
+  const scale = 50 / 3.28084; // Pixels per meter
+  const widthPx = widthFt * 3.28084 * scale; // Convert ft to m to pixels
+  const lengthPx = lengthFt * 3.28084 * scale;
+  return [
+    { x: 0, y: 0 },
+    { x: widthPx, y: 0 },
+    { x: widthPx, y: lengthPx },
+    { x: 0, y: lengthPx },
+  ];
+}
+
+function parseFractionalFeet(value) {
+  const parts = value.split(' ');
+  let feet = parseInt(parts[0]) || 0;
+  if (parts.length > 1) {
+    const [num, denom] = parts[1].split('/').map(Number);
+    if (num && denom) feet += num / denom;
+  }
+  return feet;
+}
+
+function formatFractionalFeet(feet) {
+  const whole = Math.floor(feet);
+  const fraction = feet - whole;
+  if (fraction < 0.0625) return `${whole}`;
+  const fractions = [
+    { value: 1/16, label: '1/16' }, { value: 1/8, label: '1/8' },
+    { value: 3/16, label: '3/16' }, { value: 1/4, label: '1/4' },
+    { value: 5/16, label: '5/16' }, { value: 3/8, label: '3/8' },
+    { value: 7/16, label: '7/16' }, { value: 1/2, label: '1/2' },
+    { value: 9/16, label: '9/16' }, { value: 5/8, label: '5/8' },
+    { value: 11/16, label: '11/16' }, { value: 3/4, label: '3/4' },
+    { value: 13/16, label: '13/16' }, { value: 7/8, label: '7/8' },
+    { value: 15/16, label: '15/16' },
+  ];
+  const closest = fractions.reduce((prev, curr) =>
+    Math.abs(curr.value - fraction) < Math.abs(prev.value - fraction) ? curr : prev
+  );
+  return `${whole} ${closest.label}`;
+}
+
 function calculateBOM(points, joistSpacing, beamSpacing, postSpacing, hasRailings) {
   const deckArea = calculateDeckArea(points);
   const boardWidth = 0.1397; // 5.5"
-  const boardLengths = [3.6576, 4.8768, 6.096]; // 12', 16', 20' in meters
+  const boardLengths = [3.6576, 4.8768, 6.096]; // 12', 16', 20' in m
   const boardsNeeded = [];
   let remainingArea = deckArea;
   for (const length of boardLengths.sort((a, b) => b - a)) {
@@ -60,7 +102,7 @@ function exportBlueprint(canvas, points) {
     const next = points[(i + 1) % points.length];
     const length = Math.sqrt((next.x - p.x) ** 2 + (next.y - p.y) ** 2) / 50 * 3.28084;
     ctx.fillStyle = 'black';
-    ctx.font = '12px bold Arial';
+    ctx.font = '12px bold Mulish';
     ctx.fillText(`${length.toFixed(2)} ft`, (p.x + next.x) / 2, (p.y + next.y) / 2);
   });
   const link = document.createElement('a');
@@ -79,7 +121,7 @@ function exportSvg(points, width, height) {
       const length = Math.sqrt((next.x - p.x) ** 2 + (next.y - p.y) ** 2) / 50 * 3.28084;
       const midX = (p.x + next.x) / 2;
       const midY = (p.y + next.y) / 2;
-      svg += `<text x="${midX}" y="${midY}" font-family="Arial" font-size="12" font-weight="bold">${length.toFixed(2)} ft</text>`;
+      svg += `<text x="${midX}" y="${midY}" font-family="Mulish" font-size="12" font-weight="bold">${length.toFixed(2)} ft</text>`;
     });
   }
   svg += '</svg>';
@@ -107,7 +149,7 @@ function exportBOM(bom, deckColor) {
   link.click();
 }
 
-function exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings) {
+function exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt) {
   const project = {
     points,
     deckColor,
@@ -115,6 +157,8 @@ function exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, h
     beamSpacing,
     postSpacing,
     hasRailings,
+    widthFt,
+    lengthFt,
     version: '1.0',
   };
   const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
