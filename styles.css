@@ -1,37 +1,122 @@
+:root {
+  --mxt-corner-roundness: 6px;
+  --toggle-blue: rgb(79, 193, 223);
+  --font-color: #666666;
+  --toolbar-bg: #f7f7f7;
+  --dark-drop-shadow: 0 1px 1px 0 rgba(0, 0, 0, 0.2), 0 0 2px 1px rgba(0, 0, 0, 0.05);
+  --mxt-font-header: 800 22px 'Mulish';
+  --mxt-font-subheader: 700 15px 'Mulish';
+  --mxt-font-body: 500 13px 'Mulish';
+  --mxt-font-body-bold: 700 13px 'Mulish';
+}
+
+.bg-body {
+  background-color: var(--toolbar-bg);
+}
+
+.font-family-mulish {
+  font-family: 'Mulish', sans-serif;
+}
+
+h1 {
+  font: var(--mxt-font-header);
+}
+
+h2 {
+  font: var(--mxt-font-subheader);
+}
+
+button {
+  font: var(--mxt-font-body-bold);
+}
+
 .tooltip {
   position: relative;
   display: inline-block;
 }
+
 .tooltip .tooltiptext {
   visibility: hidden;
   width: 200px;
   background-color: #555;
   color: #fff;
   text-align: center;
-  border-radius: 6px;
+  border-radius: var(--mxt-corner-roundness);
   padding: 5px;
   position: absolute;
-  z-index: 1;
+  z-index: 1000;
   bottom: 125%;
   left: 50%;
   margin-left: -100px;
   opacity: 0;
   transition: opacity 0.3s;
 }
+
 .tooltip:hover .tooltiptext {
   visibility: visible;
   opacity: 1;
 }
+
 .panel {
-  background-color: #f3f4f6;
-  border-radius: 0.5rem;
+  background-color: #fff;
+  border-radius: var(--mxt-corner-roundness);
   padding: 1rem;
   margin-bottom: 1rem;
+  box-shadow: var(--dark-drop-shadow);
 }
+
 .panel-header {
   cursor: pointer;
-  font-weight: bold;
+  font: var(--mxt-font-body-bold);
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.mxt-form-control {
+  width: 100%;
+  height: 40px;
+  border: 1px solid #ccc;
+  border-radius: var(--mxt-corner-roundness);
+  padding: 6px 12px;
+  font: var(--mxt-font-body);
+  color: var(--font-color);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+}
+
+.mxt-fraction-select {
+  width: 80px;
+  height: 40px;
+  margin-left: 10px;
+}
+
+.mxt-btn {
+  background: var(--toggle-blue);
+  color: #fff;
+  border-radius: var(--mxt-corner-roundness);
+  padding: 8px 16px;
+  font: var(--mxt-font-body-bold);
+  cursor: pointer;
+  box-shadow: var(--dark-drop-shadow);
+  border: none;
+}
+
+.mxt-btn:hover {
+  background: rgb(60, 174, 204);
+}
+
+.mxt-popover {
+  position: absolute;
+  background: #fff;
+  border-radius: var(--mxt-corner-roundness);
+  box-shadow: var(--dark-drop-shadow);
+  padding: 10px;
+  z-index: 1001;
+  max-width: 300px;
+  font: var(--mxt-font-body);
+  color: var(--font-color);
+}
+
+.mxt-popover-content {
+  text-align: center;
 }
