@@ -1,159 +1,227 @@
-function calculateDeckArea(points) {
-  if (points.length < 3) return 0;
-  return Math.abs(points.reduce((sum, p, i) => {
-    const next = points[(i + 1) % points.length];
-    return sum + (p.x * next.y - next.x * p.y);
-  }, 0) / 2 / 50 / 50);
+const { useState, useEffect, useRef } = React;
+const { createRoot } = ReactDOM;
+function Panel({ title, children }) {
+  const [isOpen, setIsOpen] = useState(true);
+  return (
+    <div className="panel">
+      <div className="panel-header" onClick={() => setIsOpen(!isOpen)}>
+        <span>{title}</span>
+        <span>{isOpen ? '▼' : '▶'}</span>
+      </div>
+      {isOpen && <div className="mt-2">{children}</div>}
+    </div>
+  );
 }
-function createDefaultDeck(widthFt = 12, lengthFt = 12) {
-  console.log('Creating default deck:', widthFt, 'x', lengthFt);
-  const scale = 50 / 3.28084;
-  const widthPx = widthFt * 3.28084 * scale;
-  const lengthPx = lengthFt * 3.28084 * scale;
-  return [
-    { x: 0, y: 0 },
-    { x: widthPx, y: 0 },
-    { x: widthPx, y: lengthPx },
-    { x: 0, y: lengthPx },
-  ];
+function Popover({ isOpen, onClose, children, x, y }) {
+  if (!isOpen) return null;
+  return (
+    <div className="mxt-popover" style={{ top: y, left: x }}>
+      <div className="mxt-popover-content">
+        <button className="mxt-btn" onClick={onClose}>Close</button>
+        {children}
+      </div>
+    </div>
+  );
 }
-function parseFractionalFeet(value) {
-  try {
-    if (!value) return 0;
-    const parts = value.trim().split(' ');
-    let feet = parseInt(parts[0]) || 0;
-    if (parts.length > 1) {
-      const [num, denom] = parts[1].split('/').map(Number);
-      if (num && denom && !isNaN(num) && !isNaN(denom)) feet += num / denom;
+function DeckDesigner() {
+  console.log('Rendering DeckDesigner');
+  const [points, setPoints] = useState(createDefaultDeck());
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const [deckColor, setDeckColor] = useState('Driftwood');
+  const [hasRailings, setHasRailings] = useState(false);
+  const [joistSpacing, setJoistSpacing] = useState(0.3048);
+  const [beamSpacing, setBeamSpacing] = useState(2.4384);
+  const [postSpacing, setPostSpacing] = useState(2.4384);
+  const [widthFt, setWidthFt] = useState('12');
+  const [lengthFt, setLengthFt] = useState('12');
+  const [error, setError] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const canvas2DRef = useRef(null);
+  const canvas3DRef = useRef(null);
+  const sceneRef = useRef(null);
+  const deckMeshRef = useRef(null);
+  const joistMeshesRef = useRef([]);
+  const beamMeshesRef = useRef([]);
+  const postMeshesRef = useRef([]);
+  const railingMeshesRef = useRef([]);
+  const cameraRef = useRef(null);
+  useEffect(() => {
+    try {
+      console.log('Initializing 2D canvas');
+      const canvas = canvas2DRef.current;
+      if (!canvas) throw new Error('2D canvas not found');
+      canvas.width = canvas.offsetWidth || 600;
+      canvas.height = 400;
+      const ctx = canvas.getContext('2d');
+      const drawGrid = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= canvas.width; x += 50) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += 50) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+      };
+      const drawDeck = () => {
+        drawGrid();
+        if (points.length > 0) {
+          ctx.fillStyle = 'blue';
+          ctx.strokeStyle = 'black';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          points.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+            ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+          });
+          if (points.length > 2) ctx.closePath();
+          ctx.stroke();
+        }
+      };
+      const handleClick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.round((e.clientX - rect.left) / 50) * 50;
+        const y = Math.round((e.clientY - rect.top) / 50) * 50;
+        setPoints([...points, { x, y }]);
+        setWidthFt('');
+        setLengthFt('');
+      };
+      const handleMouseDown = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const clickedPoint = points.findIndex(p => Math.abs(p.x - x) < 10 && Math.abs(p.y - y) < 10);
+        if (clickedPoint !== -1) setSelectedPoint(clickedPoint);
+      };
+      const handleMouseMove = (e) => {
+        if (selectedPoint !== null) {
+          const rect = canvas.getBoundingClientRect();
+          const x = Math.round((e.clientX - rect.left) / 50) * 50;
+          const y = Math.round((e.clientY - rect.top) / 50) * 50;
+          const newPoints = [...points];
+          newPoints[selectedPoint] = { x, y };
+          setPoints(newPoints);
+          setWidthFt('');
+          setLengthFt('');
+        }
+      };
+      const handleMouseUp = () => {
+        setSelectedPoint(null);
+      };
+      canvas.addEventListener('click', handleClick);
+      canvas.addEventListener('mousedown', handleMouseDown);
+      canvas.addEventListener('mousemove', handleMouseMove);
+      canvas.addEventListener('mouseup', handleMouseUp);
+      drawDeck();
+      return () => {
+        canvas.removeEventListener('click', handleClick);
+        canvas.removeEventListener('mousedown', handleMouseDown);
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.removeEventListener('mouseup', handleMouseUp);
+      };
+    } catch (err) {
+      console.error('2D canvas error:', err);
+      setError('2D canvas initialization failed: ' + err.message);
     }
-    return feet;
-  } catch (e) {
-    console.error('Parse fractional feet error:', e);
-    return 0;
-  }
-}
-function calculateBOM(points, joistSpacing, beamSpacing, postSpacing, hasRailings) {
-  try {
-    const deckArea = calculateDeckArea(points);
-    const boardWidth = 0.1397;
-    const boardLengths = [3.6576, 4.8768, 6.096];
-    const boardsNeeded = [];
-    let remainingArea = deckArea;
-    for (const length of boardLengths.sort((a, b) => b - a)) {
-      const boards = Math.ceil(remainingArea / (length * boardWidth));
-      if (boards > 0) {
-        boardsNeeded.push({ length, count: boards });
-        remainingArea -= boards * length * boardWidth;
-      }
-    }
-    const bounds = points.length > 0 ? {
-      minX: Math.min(...points.map(p => p.x / 50)),
-      maxX: Math.max(...points.map(p => p.x / 50)),
-      minZ: Math.min(...points.map(p => p.y / 50)),
-      maxZ: Math.max(...points.map(p => p.y / 50)),
-    } : { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
-    const joistCount = Math.floor((bounds.maxX - bounds.minX) / joistSpacing) + 1;
-    const joistLength = bounds.maxZ - bounds.minZ;
-    const beamCount = Math.floor((bounds.maxZ - bounds.minZ) / beamSpacing) + 1;
-    const beamLength = bounds.maxX - bounds.minX;
-    const postCount = Math.floor((bounds.maxX - bounds.minX) / postSpacing + 1) * Math.floor((bounds.maxZ - bounds.minZ) / postSpacing + 1);
-    const railingLength = hasRailings ? points.reduce((sum, p, i) => {
-      const next = points[(i + 1) % points.length];
-      return sum + Math.sqrt((next.x - p.x) ** 2 + (next.y - p.y) ** 2) / 50;
-    }, 0) : 0;
-    const fastenersPerBoard = 2;
-    const totalFasteners = boardsNeeded.reduce((sum, b) => sum + b.count * fastenersPerBoard, 0);
-    return { boardsNeeded, joistCount, joistLength, beamCount, beamLength, postCount, railingLength, totalFasteners };
-  } catch (e) {
-    console.error('BOM calculation error:', e);
-    return { boardsNeeded: [], joistCount: 0, joistLength: 0, beamCount: 0, beamLength: 0, postCount: 0, railingLength: 0, totalFasteners: 0 };
-  }
-}
-function exportBlueprint(canvas, points) {
-  try {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    points.forEach((p, i) => {
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-    points.forEach((p, i) => {
-      const next = points[(i + 1) % points.length];
-      const length = Math.sqrt((next.x - p.x) ** 2 + (next.y - p.y) ** 2) / 50 * 3.28084;
-      ctx.fillStyle = 'black';
-      ctx.font = '12px bold Mulish';
-      ctx.fillText(`${length.toFixed(2)} ft`, (p.x + next.x) / 2, (p.y + next.y) / 2);
-    });
-    const link = document.createElement('a');
-    link.download = 'deck_blueprint.png';
-    link.href = canvas.toDataURL();
-    link.click();
-  } catch (e) {
-    console.error('Export blueprint error:', e);
-  }
-}
-function exportSvg(points, width, height) {
-  try {
-    let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`;
-    svg += '<rect width="100%" height="100%" fill="white"/>';
-    if (points.length > 2) {
-      svg += '<polygon points="' + points.map(p => `${p.x},${p.y}`).join(' ') + '" fill="none" stroke="black" stroke-width="2"/>';
-      points.forEach((p, i) => {
-        const next = points[(i + 1) % points.length];
-        const length = Math.sqrt((next.x - p.x) ** 2 + (next.y - p.y) ** 2) / 50 * 3.28084;
-        const midX = (p.x + next.x) / 2;
-        const midY = (p.y + next.y) / 2;
-        svg += `<text x="${midX}" y="${midY}" font-family="Mulish" font-size="12" font-weight="bold">${length.toFixed(2)} ft</text>`;
+  }, [points]);
+  useEffect(() => {
+    try {
+      console.log('Initializing Babylon.js');
+      const canvas = canvas3DRef.current;
+      if (!canvas) throw new Error('3D canvas not found');
+      canvas.width = canvas.offsetWidth || 600;
+      canvas.height = 400;
+      if (!window.BABYLON || !BABYLON.Engine.isSupported()) throw new Error('WebGL or Babylon.js not supported');
+      const engine = new BABYLON.Engine(canvas, true);
+      const scene = new BABYLON.Scene(engine);
+      sceneRef.current = scene;
+      const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 3, Math.PI / 4, 30, new BABYLON.Vector3(0, 0, 0), scene);
+      camera.attachControl(canvas, true);
+      camera.minZ = 0.1;
+      cameraRef.current = camera;
+      const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 1), scene);
+      light.intensity = 0.8;
+      const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, scene);
+      ground.material = new BABYLON.StandardMaterial("groundMat", scene);
+      ground.material.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.1);
+      scene.debugLayer.show({ embedMode: false });
+      engine.runRenderLoop(() => {
+        try {
+          scene.render();
+        } catch (err) {
+          console.error('Render loop error:', err);
+        }
       });
+      const handleResize = () => {
+        try {
+          engine.resize();
+        } catch (err) {
+          console.error('Resize error:', err);
+        }
+      };
+      window.addEventListener('resize', handleResize);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        engine.dispose();
+      };
+    } catch (err) {
+      console.error('Babylon.js error:', err);
+      setError('3D scene initialization failed: ' + err.message);
     }
-    svg += '</svg>';
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const link = document.createElement('a');
-    link.download = 'deck_blueprint.svg';
-    link.href = URL.createObjectURL(blob);
-    link.click();
-  } catch (e) {
-    console.error('Export SVG error:', e);
-  }
-}
-function exportBOM(bom, deckColor) {
-  try {
-    let csv = 'Item,Quantity,Unit,Details\n';
-    bom.boardsNeeded.forEach(b => {
-      csv += `Deck Board,${b.count},Each,American Pro PVC 1" x 5.5" x ${(b.length * 3.28084).toFixed(0)} ft (${deckColor})\n`;
-    });
-    csv += `Joists,${bom.joistCount},Each,2x8 x ${bom.joistLength.toFixed(1)} m\n`;
-    csv += `Beams,${bom.beamCount},Each,4x8 x ${bom.beamLength.toFixed(1)} m\n`;
-    csv += `Posts,${bom.postCount},Each,4x4 x 2.4384 m\n`;
-    if (bom.railingLength) csv += `Railing,${bom.railingLength.toFixed(1)},Meters,Standard Railing\n`;
-    csv += `Fasteners,${bom.totalFasteners},Each,Hidden Fasteners\n`;
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.download = 'deck_bom.csv';
-    link.href = URL.createObjectURL(blob);
-    link.click();
-  } catch (e) {
-    console.error('Export BOM error:', e);
-  }
-}
-function exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt) {
-  try {
-    const project = {
-      points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt, version: '1.0'
-    };
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.download = 'deck_project.json';
-    link.href = URL.createObjectURL(blob);
-    link.click();
-  } catch (e) {
-    console.error('Export JSON error:', e);
-  }
-}
+  }, []);
+  useEffect(() => {
+    try {
+      console.log('Updating 3D deck with points:', points);
+      const scene = sceneRef.current;
+      if (!scene) return;
+      if (deckMeshRef.current) deckMeshRef.current.dispose();
+      joistMeshesRef.current.forEach(mesh => mesh.dispose());
+      beamMeshesRef.current.forEach(mesh => mesh.dispose());
+      postMeshesRef.current.forEach(mesh => mesh.dispose());
+      railingMeshesRef.current.forEach(mesh => mesh.dispose());
+      joistMeshesRef.current = [];
+      beamMeshesRef.current = [];
+      postMeshesRef.current = [];
+      railingMeshesRef.current = [];
+      if (points.length >= 3) {
+        const vertices = points.map(p => new BABYLON.Vector3(p.x / 50, 0.0254, p.y / 50));
+        const deck = BABYLON.MeshBuilder.CreatePolygon("deck", { shape: vertices, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
+        const deckMat = new BABYLON.StandardMaterial("deckMat", scene);
+        deckMat.diffuseColor = deckColor === 'Driftwood' ? new BABYLON.Color3(0.6, 0.6, 0.6) :
+                              deckColor === 'Khaki' ? new BABYLON.Color3(0.76, 0.7, 0.5) :
+                              new BABYLON.Color3(0.54, 0.33, 0.2);
+        deck.material = deckMat;
+        deckMeshRef.current = deck;
+        console.log('Deck mesh created with vertices:', vertices);
+        const bounds = {
+          minX: Math.min(...points.map(p => p.x / 50)),
+          maxX: Math.max(...points.map(p => p.x / 50)),
+          minZ: Math.min(...points.map(p => p.y / 50)),
+          maxZ: Math.max(...points.map(p => p.y / 50)),
+        };
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+        cameraRef.current.target = new BABYLON.Vector3(centerX, 0, centerZ);
+        cameraRef.current.radius = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) * 1.5;
+        const joistWidth = 0.0381;
+        const joistHeight = 0.18415;
+        for (let x = bounds.minX + joistSpacing; x < bounds.maxX; x += joistSpacing) {
+          const joist = BABYLON.MeshBuilder.CreateBox("joist", { width: joistWidth, height: joistHeight, depth: bounds.maxZ - bounds.minZ }, scene);
+          joist.position = new BABYLON.Vector3(x, 0.0254 - joistHeight / 2, (bounds.minZ + bounds.maxZ) / 2);
+          joist.material = new BABYLON.StandardMaterial("joistMat", scene);
+          joist.material.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+          joistMeshesRef.current.push(joist);
+        }
+        const beamWidth = 0.0889;
+        const beamHeight = 0.18415;
+        for (let z = bounds.minZ + beamSpacing; z < bounds.maxZ; z += beamSpacing) {
+          const beam = BABYLON.MeshBuilder.CreateBox("beam", { width: bounds.maxX - bounds.minX, height: beamHeight, depth: beamWidth }, scene);
+          beam.position = new BABYLON
