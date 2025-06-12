@@ -11,6 +11,8 @@
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+  <script src="https://cdn.babylonjs.com/postProcesses/babylonjs.postProcess.min.js"></script>
+  <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Mulish:wght@500;700;800&display=swap" rel="stylesheet">
   <style>
@@ -73,6 +75,8 @@
   <div id="root"></div>
   <script type="text/babel">
     console.log('Starting Deck Designer');
+
+    // Utility Functions
     function calculateDeckArea(points) {
       if (points.length < 3) return 0;
       return Math.abs(points.reduce((sum, p, i) => {
@@ -80,6 +84,7 @@
         return sum + (p.x * next.y - next.x * p.y);
       }, 0) / 2 / 50 / 50);
     }
+
     function createDefaultDeck(widthFt = 12, lengthFt = 12) {
       console.log('Creating default deck:', widthFt, 'x', lengthFt);
       const scale = 50 / 3.28084;
@@ -92,6 +97,7 @@
         { x: 0, y: lengthPx },
       ];
     }
+
     function parseFractionalFeet(value) {
       try {
         if (!value) return 0;
@@ -107,6 +113,7 @@
         return 0;
       }
     }
+
     function calculateBOM(points, joistSpacing, beamSpacing, postSpacing, hasRailings) {
       try {
         const deckArea = calculateDeckArea(points);
@@ -144,6 +151,7 @@
         return { boardsNeeded: [], joistCount: 0, joistLength: 0, beamCount: 0, beamLength: 0, postCount: 0, railingLength: 0, totalFasteners: 0 };
       }
     }
+
     function exportBlueprint(canvas, points) {
       try {
         const ctx = canvas.getContext('2d');
@@ -174,6 +182,7 @@
         console.error('Export blueprint error:', e);
       }
     }
+
     function exportSvg(points, width, height) {
       try {
         let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">`;
@@ -198,11 +207,12 @@
         console.error('Export SVG error:', e);
       }
     }
-    function exportBOM(bom, deckColor) {
+
+    function exportBOM(bom, deckColor, deckTexture) {
       try {
         let csv = 'Item,Quantity,Unit,Details\n';
         bom.boardsNeeded.forEach(b => {
-          csv += `Deck Board,${b.count},Each,American Pro PVC 1" x 5.5" x ${(b.length * 3.28084).toFixed(0)} ft (${deckColor})\n`;
+          csv += `Deck Board,${b.count},Each,American Pro PVC 1" x 5.5" x ${(b.length * 3.28084).toFixed(0)} ft (${deckColor}, ${deckTexture})\n`;
         });
         csv += `Joists,${bom.joistCount},Each,2x8 x ${bom.joistLength.toFixed(1)} m\n`;
         csv += `Beams,${bom.beamCount},Each,4x8 x ${bom.beamLength.toFixed(1)} m\n`;
@@ -218,10 +228,11 @@
         console.error('Export BOM error:', e);
       }
     }
-    function exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt) {
+
+    function exportJSON(points, deckColor, deckTexture, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt, stairSteps) {
       try {
         const project = {
-          points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt, version: '1.0'
+          points, deckColor, deckTexture, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt, stairSteps, version: '1.1'
         };
         const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
         const link = document.createElement('a');
@@ -232,8 +243,11 @@
         console.error('Export JSON error:', e);
       }
     }
+
+    // React Components
     const { useState, useEffect, useRef } = React;
     const { createRoot } = ReactDOM;
+
     function Panel({ title, children }) {
       const [isOpen, setIsOpen] = useState(true);
       return (
@@ -246,6 +260,7 @@
         </div>
       );
     }
+
     function Popover({ isOpen, onClose, children, x, y }) {
       if (!isOpen) return null;
       return (
@@ -257,17 +272,21 @@
         </div>
       );
     }
+
     function DeckDesigner() {
       console.log('Rendering DeckDesigner');
       const [points, setPoints] = useState(createDefaultDeck());
       const [selectedPoint, setSelectedPoint] = useState(null);
       const [deckColor, setDeckColor] = useState('Driftwood');
+      const [deckTexture, setDeckTexture] = useState('Smooth');
       const [hasRailings, setHasRailings] = useState(false);
       const [joistSpacing, setJoistSpacing] = useState(0.3048);
       const [beamSpacing, setBeamSpacing] = useState(2.4384);
       const [postSpacing, setPostSpacing] = useState(2.4384);
       const [widthFt, setWidthFt] = useState('12');
       const [lengthFt, setLengthFt] = useState('12');
+      const [stairSteps, setStairSteps] = useState(3);
+      const [isSidebarOpen, setIsSidebarOpen] = useState(true);
       const [error, setError] = useState(null);
       const [showHelp, setShowHelp] = useState(false);
       const canvas2DRef = useRef(null);
@@ -278,7 +297,23 @@
       const beamMeshesRef = useRef([]);
       const postMeshesRef = useRef([]);
       const railingMeshesRef = useRef([]);
+      const stairMeshesRef = useRef([]);
       const cameraRef = useRef(null);
+      const shadowGeneratorRef = useRef(null);
+
+      // Debounce utility
+      const debounce = (func, wait) => {
+        let timeout;
+        return (...args) => {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => func(...args), wait);
+        };
+      };
+
+      const handleWidthChange = debounce((value) => setWidthFt(value), 300);
+      const handleLengthChange = debounce((value) => setLengthFt(value), 300);
+
+      // 2D Canvas Setup
       useEffect(() => {
         try {
           console.log('Initializing 2D canvas');
@@ -307,7 +342,7 @@
           const drawDeck = () => {
             drawGrid();
             if (points.length > 0) {
-              ctx.fillStyle = 'blue';
+              ctx.fillStyle = 'rgba(139, 69, 19, 0.7)'; // Brownish tint for wood
               ctx.strokeStyle = 'black';
               ctx.lineWidth = 2;
               ctx.beginPath();
@@ -317,7 +352,13 @@
                 ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
               });
               if (points.length > 2) ctx.closePath();
-              ctx.stroke();
+              ctx.fill(); // Fill with wood-like color
+              ctx.stroke(); // Outline
+              // Add simple wood grain effect
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+              for (let x = 0; x < canvas.width; x += 10) {
+                ctx.fillRect(x, 0, 5, canvas.height);
+              }
             }
           };
           const handleClick = (e) => {
@@ -366,6 +407,8 @@
           setError('2D canvas initialization failed: ' + err.message);
         }
       }, [points]);
+
+      // 3D Scene Setup
       useEffect(() => {
         try {
           console.log('Initializing Babylon.js');
@@ -374,18 +417,62 @@
           canvas.width = canvas.offsetWidth || 600;
           canvas.height = 400;
           if (!window.BABYLON || !BABYLON.Engine.isSupported()) throw new Error('WebGL or Babylon.js not supported');
-          const engine = new BABYLON.Engine(canvas, true);
+          const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
           const scene = new BABYLON.Scene(engine);
           sceneRef.current = scene;
+
+          // Lighting and Shadows
+          const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-0.5, -1, -0.5), scene); // Sun-like angle
+          dirLight.position = new BABYLON.Vector3(20, 40, 20);
+          dirLight.intensity = 0.6;
+          const shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
+          shadowGenerator.useBlurExponentialShadowMap = true;
+          shadowGenerator.blurScale = 2;
+          shadowGeneratorRef.current = shadowGenerator;
+
+          const hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+          hemiLight.intensity = 0.4;
+
+          // Ground with texture
+          const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, scene);
+          const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+          groundMat.diffuseTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/grass.jpg", scene);
+          ground.material = groundMat;
+          ground.receiveShadows = true;
+
+          // Add trees (using billboards for simplicity)
+          const treeTexture = new BABYLON.Texture("https://example.com/textures/tree.png", scene);
+          const treeMaterial = new BABYLON.StandardMaterial("treeMat", scene);
+          treeMaterial.diffuseTexture = treeTexture;
+          treeMaterial.backFaceCulling = false;
+          for (let i = 0; i < 4; i++) {
+            const tree = BABYLON.MeshBuilder.CreatePlane("tree" + i, { size: 5 }, scene);
+            tree.material = treeMaterial;
+            tree.position = new BABYLON.Vector3(-40 + i * 30, 2.5, -40);
+            tree.receiveShadows = true;
+          }
+
+          // Add fence
+          const fence = BABYLON.MeshBuilder.CreateBox("fence", { width: 100, height: 1.5, depth: 0.1 }, scene);
+          const fenceMat = new BABYLON.StandardMaterial("fenceMat", scene);
+          fenceMat.diffuseColor = new BABYLON.Color3(0.8, 0.6, 0.4); // Wood-like color
+          fence.material = fenceMat;
+          fence.position = new BABYLON.Vector3(0, 0.75, -50);
+          fence.receiveShadows = true;
+          shadowGenerator.addShadowCaster(fence);
+
+          // Camera setup
           const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 3, Math.PI / 4, 30, new BABYLON.Vector3(0, 0, 0), scene);
           camera.attachControl(canvas, true);
           camera.minZ = 0.1;
           cameraRef.current = camera;
-          const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 1), scene);
-          light.intensity = 0.8;
-          const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, scene);
-          ground.material = new BABYLON.StandardMaterial("groundMat", scene);
-          ground.material.diffuseColor = new BABYLON.Color3(0.1, 0.5, 0.1);
+
+          // Post-processing
+          const pipeline = new BABYLON.DefaultRenderingPipeline("default", true, scene, [camera]);
+          pipeline.samples = 4;
+          pipeline.fxaaEnabled = true;
+          pipeline.bloomEnabled = true;
+
           scene.debugLayer.show({ embedMode: false });
           engine.runRenderLoop(() => {
             try {
@@ -411,30 +498,48 @@
           setError('3D scene initialization failed: ' + err.message);
         }
       }, []);
+
+      // 3D Deck Update
       useEffect(() => {
         try {
           console.log('Updating 3D deck with points:', points);
           const scene = sceneRef.current;
-          if (!scene) return;
+          const shadowGenerator = shadowGeneratorRef.current;
+          if (!scene || !shadowGenerator) return;
+
+          // Clean up existing meshes
           if (deckMeshRef.current) deckMeshRef.current.dispose();
           joistMeshesRef.current.forEach(mesh => mesh.dispose());
           beamMeshesRef.current.forEach(mesh => mesh.dispose());
           postMeshesRef.current.forEach(mesh => mesh.dispose());
           railingMeshesRef.current.forEach(mesh => mesh.dispose());
+          stairMeshesRef.current.forEach(mesh => mesh.dispose());
           joistMeshesRef.current = [];
           beamMeshesRef.current = [];
           postMeshesRef.current = [];
           railingMeshesRef.current = [];
+          stairMeshesRef.current = [];
+
           if (points.length >= 3) {
+            // Deck mesh
             const vertices = points.map(p => new BABYLON.Vector3(p.x / 50, 0.0254, p.y / 50));
             const deck = BABYLON.MeshBuilder.CreatePolygon("deck", { shape: vertices, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene);
             const deckMat = new BABYLON.StandardMaterial("deckMat", scene);
-            deckMat.diffuseColor = deckColor === 'Driftwood' ? new BABYLON.Color3(0.6, 0.6, 0.6) :
-                                  deckColor === 'Khaki' ? new BABYLON.Color3(0.76, 0.7, 0.5) :
-                                  new BABYLON.Color3(0.54, 0.33, 0.2);
+            deckMat.diffuseTexture = new BABYLON.Texture(
+              `https://example.com/textures/${deckColor.toLowerCase()}_${deckTexture.toLowerCase()}.jpg`, scene
+            );
+            deckMat.specularTexture = new BABYLON.Texture(
+              `https://example.com/textures/${deckColor.toLowerCase()}_${deckTexture.toLowerCase()}_spec.jpg`, scene
+            );
+            deckMat.bumpTexture = new BABYLON.Texture(
+              `https://example.com/textures/${deckColor.toLowerCase()}_${deckTexture.toLowerCase()}_bump.jpg`, scene
+            );
+            deckMat.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
             deck.material = deckMat;
+            deck.receiveShadows = true;
+            shadowGenerator.addShadowCaster(deck);
             deckMeshRef.current = deck;
-            console.log('Deck mesh created with vertices:', vertices);
+
             const bounds = {
               minX: Math.min(...points.map(p => p.x / 50)),
               maxX: Math.max(...points.map(p => p.x / 50)),
@@ -445,35 +550,56 @@
             const centerZ = (bounds.minZ + bounds.maxZ) / 2;
             cameraRef.current.target = new BABYLON.Vector3(centerX, 0, centerZ);
             cameraRef.current.radius = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) * 1.5;
+
+            // Joists with instancing
             const joistWidth = 0.0381;
             const joistHeight = 0.18415;
-            for (let x = bounds.minX + joistSpacing; x < bounds.maxX; x += joistSpacing) {
-              const joist = BABYLON.MeshBuilder.CreateBox("joist", { width: joistWidth, height: joistHeight, depth: bounds.maxZ - bounds.minZ }, scene);
-              joist.position = new BABYLON.Vector3(x, 0.0254 - joistHeight / 2, (bounds.minZ + bounds.maxZ) / 2);
-              joist.material = new BABYLON.StandardMaterial("joistMat", scene);
-              joist.material.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
-              joistMeshesRef.current.push(joist);
+            if (joistMeshesRef.current.length === 0) {
+              const joistTemplate = BABYLON.MeshBuilder.CreateBox("joistTemplate", { width: joistWidth, height: joistHeight, depth: bounds.maxZ - bounds.minZ }, scene);
+              const joistMat = new BABYLON.StandardMaterial("joistMat", scene);
+              joistMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+              joistTemplate.material = joistMat;
+              joistTemplate.isVisible = false;
+              shadowGenerator.addShadowCaster(joistTemplate);
+              for (let x = bounds.minX + joistSpacing; x < bounds.maxX; x += joistSpacing) {
+                const joist = joistTemplate.createInstance(`joist_${x}`);
+                joist.position = new BABYLON.Vector3(x, 0.0254 - joistHeight / 2, (bounds.minZ + bounds.maxZ) / 2);
+                joist.receiveShadows = true;
+                joistMeshesRef.current.push(joist);
+              }
             }
+
+            // Beams
             const beamWidth = 0.0889;
             const beamHeight = 0.18415;
             for (let z = bounds.minZ + beamSpacing; z < bounds.maxZ; z += beamSpacing) {
               const beam = BABYLON.MeshBuilder.CreateBox("beam", { width: bounds.maxX - bounds.minX, height: beamHeight, depth: beamWidth }, scene);
               beam.position = new BABYLON.Vector3((bounds.minX + bounds.maxX) / 2, 0.0254 - beamHeight - joistHeight / 2, z);
-              beam.material = new BABYLON.StandardMaterial("beamMat", scene);
-              beam.material.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+              const beamMat = new BABYLON.StandardMaterial("beamMat", scene);
+              beamMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+              beam.material = beamMat;
+              beam.receiveShadows = true;
+              shadowGenerator.addShadowCaster(beam);
               beamMeshesRef.current.push(beam);
             }
+
+            // Posts
             const postWidth = 0.0889;
             const postHeight = 2.4384;
             for (let z = bounds.minZ; z <= bounds.maxZ; z += postSpacing) {
               for (let x = bounds.minX; x <= bounds.maxX; x += postSpacing) {
                 const post = BABYLON.MeshBuilder.CreateBox("post", { width: postWidth, height: postHeight, depth: postWidth }, scene);
                 post.position = new BABYLON.Vector3(x, -postHeight / 2, z);
-                post.material = new BABYLON.StandardMaterial("postMat", scene);
-                post.material.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+                const postMat = new BABYLON.StandardMaterial("postMat", scene);
+                postMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+                post.material = postMat;
+                post.receiveShadows = true;
+                shadowGenerator.addShadowCaster(post);
                 postMeshesRef.current.push(post);
               }
             }
+
+            // Railings
             if (hasRailings) {
               for (let i = 0; i < points.length; i++) {
                 const start = points[i];
@@ -485,8 +611,11 @@
                 railing.position = new BABYLON.Vector3(midX, 0.9144 / 2, midZ);
                 const angle = Math.atan2(end.y - start.y, end.x - start.x);
                 railing.rotation.y = angle;
-                railing.material = new BABYLON.StandardMaterial("railingMat", scene);
-                railing.material.diffuseColor = new BABYLON.Color3(0.29, 0.18, 0.1);
+                const railingMat = new BABYLON.StandardMaterial("railingMat", scene);
+                railingMat.diffuseColor = new BABYLON.Color3(0.29, 0.18, 0.1);
+                railing.material = railingMat;
+                railing.receiveShadows = true;
+                shadowGenerator.addShadowCaster(railing);
                 railingMeshesRef.current.push(railing);
               }
             }
@@ -495,7 +624,8 @@
           console.error('3D deck update error:', err);
           setError('Failed to update 3D deck: ' + err.message);
         }
-      }, [points, deckColor, hasRailings, joistSpacing, beamSpacing, postSpacing]);
+      }, [points, deckColor, deckTexture, hasRailings, joistSpacing, beamSpacing, postSpacing]);
+
       const handleApplyDimensions = () => {
         try {
           const width = parseFractionalFeet(widthFt);
@@ -507,6 +637,41 @@
           setError('Invalid dimensions: ' + err.message);
         }
       };
+
+      const addStairs = (steps) => {
+        try {
+          const scene = sceneRef.current;
+          const shadowGenerator = shadowGeneratorRef.current;
+          if (!scene) return;
+          stairMeshesRef.current.forEach(mesh => mesh.dispose());
+          stairMeshesRef.current = [];
+          const stepHeight = 0.15;
+          const stepDepth = 0.3;
+          const stairWidth = 1.2;
+          const bounds = points.length > 0 ? {
+            minX: Math.min(...points.map(p => p.x / 50)),
+            maxX: Math.max(...points.map(p => p.x / 50)),
+            minZ: Math.min(...points.map(p => p.y / 50)),
+            maxZ: Math.max(...points.map(p => p.y / 50)),
+          } : { minX: 0, maxX: 12, minZ: 0, maxZ: 12 };
+          for (let i = 0; i < steps; i++) {
+            const step = BABYLON.MeshBuilder.CreateBox(`step_${i}`, { width: stairWidth, height: stepHeight, depth: stepDepth }, scene);
+            step.position = new BABYLON.Vector3(bounds.maxX + stairWidth / 2, i * stepHeight + stepHeight / 2, bounds.maxZ + i * stepDepth);
+            const stepMat = new BABYLON.StandardMaterial(`stepMat_${i}`, scene);
+            stepMat.diffuseTexture = new BABYLON.Texture(
+              `https://example.com/textures/${deckColor.toLowerCase()}_${deckTexture.toLowerCase()}.jpg`, scene
+            );
+            step.material = stepMat;
+            step.receiveShadows = true;
+            shadowGenerator.addShadowCaster(step);
+            stairMeshesRef.current.push(step);
+          }
+        } catch (err) {
+          console.error('Add stairs error:', err);
+          setError('Failed to add stairs: ' + err.message);
+        }
+      };
+
       const resetView = () => {
         try {
           if (cameraRef.current) {
@@ -528,6 +693,7 @@
           console.error('Reset view error:', err);
         }
       };
+
       const bom = calculateBOM(points, joistSpacing, beamSpacing, postSpacing, hasRailings);
       if (error) {
         return (
@@ -537,17 +703,24 @@
           </div>
         );
       }
+
       return (
         <div className="flex flex-col h-screen">
           <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
             <div className="flex items-center">
+              <button
+                className="mxt-btn mr-4"
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              >
+                {isSidebarOpen ? 'Hide Sidebar' : 'Show Sidebar'}
+              </button>
               <img src="https://via.placeholder.com/150x50?text=American+Pro+Logo" alt="American Pro Logo" className="h-10 mr-4" />
               <h1>American Pro PVC Deck Designer</h1>
             </div>
             <p className="text-sm">1" x 5.5" Decking, 25-Year Warranty</p>
           </div>
           <div className="flex flex-1">
-            <div className="w-1/3 p-4 bg-gray-100 overflow-y-auto">
+            <div className={`w-1/3 p-4 bg-gray-100 overflow-y-auto transition-all ${isSidebarOpen ? '' : 'w-0 p-0 overflow-hidden'}`}>
               <Panel title="Deck Dimensions">
                 <div className="tooltip">
                   <label className="block text-sm font-medium">Width (ft):</label>
@@ -555,7 +728,7 @@
                     <input
                       type="text"
                       value={widthFt}
-                      onChange={(e) => setWidthFt(e.target.value)}
+                      onChange={(e) => handleWidthChange(e.target.value)}
                       className="mxt-form-control w-2/3"
                       placeholder="e.g., 12 1/2"
                     />
@@ -568,7 +741,7 @@
                   <input
                     type="text"
                     value={lengthFt}
-                    onChange={(e) => setLengthFt(e.target.value)}
+                    onChange={(e) => handleLengthChange(e.target.value)}
                     className="mxt-form-control w-2/3"
                     placeholder="e.g., 16 3/4"
                   />
@@ -578,6 +751,52 @@
                 <Popover isOpen={showHelp} onClose={() => setShowHelp(false)} x={100} y={100}>
                   <p>Enter dimensions in feet with optional fractions (e.g., 12 1/2 for 12.5 ft). Click Apply to update the deck.</p>
                 </Popover>
+              </Panel>
+              <Panel title="Deck Templates">
+                <div className="flex flex-col gap-2">
+                  <button
+                    className="mxt-btn"
+                    onClick={() => setPoints(createDefaultDeck(12, 12))}
+                  >
+                    Rectangular Deck (12x12 ft)
+                  </button>
+                  <button
+                    className="mxt-btn"
+                    onClick={() => {
+                      const scale = 50 / 3.28084;
+                      setPoints([
+                        { x: 0, y: 0 },
+                        { x: 12 * 3.28084 * scale, y: 0 },
+                        { x: 12 * 3.28084 * scale, y: 12 * 3.28084 * scale },
+                        { x: 8 * 3.28084 * scale, y: 12 * 3.28084 * scale },
+                        { x: 8 * 3.28084 * scale, y: 16 * 3.28084 * scale },
+                        { x: 0, y: 16 * 3.28084 * scale },
+                      ]);
+                    }}
+                  >
+                    L-Shaped Deck
+                  </button>
+                </div>
+              </Panel>
+              <Panel title="Add Stairs">
+                <div className="tooltip">
+                  <label className="block text-sm font-medium">Number of Steps:</label>
+                  <input
+                    type="number"
+                    value={stairSteps}
+                    onChange={(e) => setStairSteps(Number(e.target.value))}
+                    className="mxt-form-control"
+                    min="1"
+                    max="10"
+                  />
+                  <span className="tooltiptext">Set the number of steps for the staircase.</span>
+                </div>
+                <button
+                  className="mxt-btn mt-4 w-full"
+                  onClick={() => addStairs(stairSteps)}
+                >
+                  Add Stairs
+                </button>
               </Panel>
               <Panel title="Design Controls">
                 <div className="tooltip">
@@ -590,8 +809,22 @@
                     <option value="Driftwood">Driftwood</option>
                     <option value="Khaki">Khaki</option>
                     <option value="Hazelnut">Hazelnut</option>
+                    <option value="Ebony">Ebony</option>
+                    <option value="Teak">Teak</option>
                   </select>
                   <span className="tooltiptext">Choose from American Pro's premium PVC decking colors.</span>
+                </div>
+                <div className="tooltip mt-4">
+                  <label className="block text-sm font-medium">Texture:</label>
+                  <select
+                    value={deckTexture}
+                    onChange={(e) => setDeckTexture(e.target.value)}
+                    className="mxt-form-control"
+                  >
+                    <option value="Smooth">Smooth</option>
+                    <option value="Grooved">Grooved</option>
+                  </select>
+                  <span className="tooltiptext">Select decking texture for appearance and traction.</span>
                 </div>
                 <div className="tooltip mt-4">
                   <label className="block text-sm font-medium">Joist Spacing (ft):</label>
@@ -684,6 +917,38 @@
               </Panel>
               <Panel title="Export Options">
                 <div className="tooltip">
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          try {
+                            const project = JSON.parse(event.target.result);
+                            setPoints(project.points);
+                            setDeckColor(project.deckColor);
+                            setDeckTexture(project.deckTexture || 'Smooth');
+                            setJoistSpacing(project.joistSpacing);
+                            setBeamSpacing(project.beamSpacing);
+                            setPostSpacing(project.postSpacing);
+                            setHasRailings(project.hasRailings);
+                            setWidthFt(project.widthFt);
+                            setLengthFt(project.lengthFt);
+                            setStairSteps(project.stairSteps || 3);
+                          } catch (err) {
+                            setError('Failed to import project: ' + err.message);
+                          }
+                        };
+                        reader.readAsText(file);
+                      }
+                    }}
+                    className="mxt-form-control mb-2"
+                  />
+                  <span className="tooltiptext">Import a previously saved project (JSON).</span>
+                </div>
+                <div className="tooltip">
                   <button
                     onClick={() => exportBlueprint(canvas2DRef.current, points)}
                     className="mxt-btn w-full mb-2"
@@ -717,7 +982,7 @@
                 </div>
                 <div className="tooltip">
                   <button
-                    onClick={() => exportBOM(bom, deckColor)}
+                    onClick={() => exportBOM(bom, deckColor, deckTexture)}
                     className="mxt-btn w-full mb-2"
                   >
                     Export BOM (CSV)
@@ -726,7 +991,7 @@
                 </div>
                 <div className="tooltip">
                   <button
-                    onClick={() => exportJSON(points, deckColor, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt)}
+                    onClick={() => exportJSON(points, deckColor, deckTexture, joistSpacing, beamSpacing, postSpacing, hasRailings, widthFt, lengthFt, stairSteps)}
                     className="mxt-btn w-full"
                   >
                     Export Project (JSON)
@@ -735,8 +1000,10 @@
                 </div>
               </Panel>
               <Panel title="Bill of Materials">
+                <p>Deck Area: {calculateDeckArea(points).toFixed(2)} sq ft</p>
+                <p>Estimated Cost: ${(calculateDeckArea(points) * 50 + bom.totalFasteners * 0.5 + bom.railingLength * 100).toFixed(2)}</p>
                 {bom.boardsNeeded.map((b, i) => (
-                  <p key={i}>Deck Boards: {b.count} x {(b.length * 3.28084).toFixed(0)} ft ({deckColor})</p>
+                  <p key={i}>Deck Boards: {b.count} x {(b.length * 3.28084).toFixed(0)} ft ({deckColor}, {deckTexture})</p>
                 ))}
                 <p>Joists: {bom.joistCount} x {bom.joistLength.toFixed(1)} m (2x8)</p>
                 <p>Beams: {bom.beamCount} x {bom.beamLength.toFixed(1)} m (4x8)</p>
@@ -759,6 +1026,7 @@
         </div>
       );
     }
+
     try {
       console.log('Attempting to render React app');
       const rootElement = document.getElementById('root');
